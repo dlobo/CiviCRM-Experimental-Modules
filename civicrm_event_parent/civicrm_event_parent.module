@@ -34,9 +34,43 @@
  *
  */
 
+define( 'PARENT_EVENT_ID'  , 1 );
+define( 'PARENT_PROFILE_ID', 9 );
+
+function _civicrm_event_parent_get_children_info( $contactID, &$form ) {
+    $sql = "
+SELECT     c.id as child_id, c.first_name, c.last_name, e.email,
+           p.id as parent_id
+FROM       civicrm_contact c
+INNER JOIN civicrm_relationship r ON c.id = r.contact_id_b
+INNER JOIN civicrm_contact      p ON p.id = r.contact_id_a
+LEFT  JOIN civicrm_email        e ON c.id = e.contact_id
+WHERE      p.id = %1
+AND        r.relationship_type_id = 1
+AND        r.is_active = 1
+";
+    $params = array( 1 => array( $contactID, 'Integer' ) );
+    $dao = CRM_Core_DAO::executeQuery( $sql, $params );
+
+    $children = array( );
+    while ( $dao->fetch( ) ) {
+        $children[] = array( 'child_id'   => $dao->child_id  ,
+                             'parent_id'  => $dao->parent_id ,
+                             'first_name' => $dao->first_name,
+                             'last_name'  => $dao->last_name ,
+                             'email'      => $dao->email );
+    }
+    
+    if ( ! empty( $children ) ) {
+        $form->set( 'children', $children );
+    }
+
+    return $children;
+}
+
 function civicrm_event_parent_civicrm_buildForm( $formName, &$form ) {
     if ( $formName == 'CRM_Event_Form_Registration_Register' &&
-         $form->getVar( '_eventId' ) == 1 ) {
+         $form->getVar( '_eventId' ) == PARENT_EVENT_ID ) {
         $mainID = CRM_Utils_Request::retrieve( 'mainID', 'Integer', $form,
                                                false, null, $_REQUEST );
         if ( $mainID ) {
@@ -48,6 +82,19 @@ function civicrm_event_parent_civicrm_buildForm( $formName, &$form ) {
                 $form->set( 'mainID'  , $mainID   );
                 $form->set( 'rTypeID' , $rTypeID  );
                 $form->set( 'rTypeDir', $rTypeDir );
+            }
+
+            // now set the various defaults
+            // basically name and email and number of children
+            $children = _civicrm_event_parent_get_children_info( $mainID, $form );
+
+            if ( ! empty( $children ) ) {
+                $defaults = array( );
+                $defaults['additional_participants'] = count( $children ) - 1;
+                $defaults['first_name'] = $children[0]['first_name'];
+                $defaults['last_name' ] = $children[0]['last_name' ];
+                $defaults['email-5'   ] = $children[0]['email'     ];
+                $form->setDefaults( $defaults );
             }
         }
     }
@@ -64,7 +111,7 @@ function civicrm_event_parent_civicrm_postProcess( $class, &$form ) {
 }
 
 function civicrm_event_parent_civicrm_postProcess_regConfirm( $class, &$form ) {
-    if ( $form->getVar( '_eventId' ) == 1 &&
+    if ( $form->getVar( '_eventId' ) == PARENT_EVENT_ID &&
          $form->get( 'mainID' ) ) {
         $mainID   = $form->get( 'mainID'   );
         $rTypeID  = $form->get( 'rTypeID'  );
@@ -105,7 +152,7 @@ WHERE  id IN ( $pIDString )
 }
 
 function civicrm_event_parent_civicrm_postProcess_profileEdit( $class, &$form ) {
-    if ( $form->getVar( '_gid' ) == 9 ) {
+    if ( $form->getVar( '_gid' ) == PARENT_PROFILE_ID ) {
         // get the contactID of the newly created contact (or existing one)
         // and redirect to event registration page
         $mainID = $form->getVar( '_id' );
