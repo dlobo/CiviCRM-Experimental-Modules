@@ -37,14 +37,15 @@
 define( 'PARENT_EVENT_ID'  , 1 );
 define( 'PARENT_PROFILE_ID', 9 );
 
-function _civicrm_event_parent_get_children_info( $contactID, &$form ) {
+function _civicrm_event_parent_get_children_info( $contactID ) {
     $sql = "
-SELECT     c.id as child_id, c.first_name, c.last_name, e.email,
-           p.id as parent_id
+SELECT     c.id as child_id, c.first_name, c.last_name, ce.email,
+           p.id as parent_id, pe.email as parent_email
 FROM       civicrm_contact c
-INNER JOIN civicrm_relationship r ON c.id = r.contact_id_b
-INNER JOIN civicrm_contact      p ON p.id = r.contact_id_a
-LEFT  JOIN civicrm_email        e ON c.id = e.contact_id
+INNER JOIN civicrm_relationship  r ON c.id = r.contact_id_b
+INNER JOIN civicrm_contact       p ON p.id = r.contact_id_a
+LEFT  JOIN civicrm_email        ce ON c.id = ce.contact_id AND ce.is_primary = 1
+LEFT  JOIN civicrm_email        pe ON p.id = pe.contact_id AND pe.is_primary = 1
 WHERE      p.id = %1
 AND        r.relationship_type_id = 1
 AND        r.is_active = 1
@@ -54,23 +55,30 @@ AND        r.is_active = 1
 
     $children = array( );
     while ( $dao->fetch( ) ) {
-        $children[] = array( 'child_id'   => $dao->child_id  ,
-                             'parent_id'  => $dao->parent_id ,
-                             'first_name' => $dao->first_name,
-                             'last_name'  => $dao->last_name ,
-                             'email'      => $dao->email );
+        $children[] = array( 'child_id'     => $dao->child_id  ,
+                             'first_name'   => $dao->first_name,
+                             'last_name'    => $dao->last_name ,
+                             'email'        => $dao->email     ,
+                             'parent_id'    => $dao->parent_id ,
+                             'parent_email' => $dao->parent_email );
     }
     
-    if ( ! empty( $children ) ) {
-        $form->set( 'children', $children );
-    }
-
     return $children;
 }
 
 function civicrm_event_parent_civicrm_buildForm( $formName, &$form ) {
-    if ( $formName == 'CRM_Event_Form_Registration_Register' &&
-         $form->getVar( '_eventId' ) == PARENT_EVENT_ID ) {
+    if ( $formName == 'CRM_Event_Form_Registration_Register' ) {
+        civicrm_event_parent_civicrm_buildForm_regRegister( $formName, $form );
+    }
+
+    if ( $formName == 'CRM_Event_Form_Registration_AdditionalParticipant' ) {
+        civicrm_event_parent_civicrm_buildForm_regAdditional( $formName, $form );
+    }
+
+}
+
+function civicrm_event_parent_civicrm_buildForm_regRegister( $formName, &$form ) {
+    if ( $form->getVar( '_eventId' ) == PARENT_EVENT_ID ) {
         $mainID = CRM_Utils_Request::retrieve( 'mainID', 'Integer', $form,
                                                false, null, $_REQUEST );
         if ( $mainID ) {
@@ -86,7 +94,8 @@ function civicrm_event_parent_civicrm_buildForm( $formName, &$form ) {
 
             // now set the various defaults
             // basically name and email and number of children
-            $children = _civicrm_event_parent_get_children_info( $mainID, $form );
+            $children = _civicrm_event_parent_get_children_info( $mainID );
+            $form->set( 'parentChildren', $children );
 
             if ( ! empty( $children ) ) {
                 $defaults = array( );
@@ -96,6 +105,21 @@ function civicrm_event_parent_civicrm_buildForm( $formName, &$form ) {
                 $defaults['email-5'   ] = $children[0]['email'     ];
                 $form->setDefaults( $defaults );
             }
+        }
+    }
+}
+
+function civicrm_event_parent_civicrm_buildForm_regAdditional( $formName, &$form ) {
+    if ( $form->getVar( '_eventId' ) == PARENT_EVENT_ID ) {
+        $children = $form->get( 'parentChildren' );
+        if ( ! empty( $children ) ) {
+            $childNum = substr( $form->getVar( '_name' ), 12 );
+
+            $defaults = array( );
+            $defaults['first_name'] = $children[$childNum]['first_name'];
+            $defaults['last_name' ] = $children[$childNum]['last_name' ];
+            $defaults['email-5'   ] = $children[$childNum]['email'     ];
+            $form->setDefaults( $defaults );
         }
     }
 }
